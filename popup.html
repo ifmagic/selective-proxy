@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Selective Proxy</title>
+  <style>
+    :root {
+      --primary-color: #4CAF50;
+      --primary-hover: #45a049;
+      --background-color: #f5f5f5;
+      --card-background: #ffffff;
+      --border-color: #e0e0e0;
+      --text-color: #333333;
+      --text-light: #666666;
+      --error-color: #f44336;
+      --success-color: #4CAF50;
+      --shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      --border-radius: 8px;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 360px;
+      padding: 20px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--background-color);
+      color: var(--text-color);
+    }
+    
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+      color: var(--text-color);
+      font-size: 18px;
+    }
+    
+    .card {
+      background-color: var(--card-background);
+      border-radius: var(--border-radius);
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+    
+    .form-group {
+      margin-bottom: 16px;
+    }
+    
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      font-size: 14px;
+      color: var(--text-light);
+    }
+    
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: var(--primary-color);
+    }
+    
+    .domain-input-container {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    
+    .domain-input-container input {
+      flex: 1;
+    }
+    
+    .add-domain-btn {
+      padding: 0 12px;
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+    
+    .add-domain-btn:hover {
+      background-color: var(--primary-hover);
+    }
+    
+    .domain-list {
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 12px;
+    }
+    
+    .domain-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background-color: #f9f9f9;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    
+    .domain-item:last-child {
+      margin-bottom: 0;
+    }
+    
+    .remove-domain-btn {
+      background-color: transparent;
+      border: none;
+      color: var(--error-color);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 4px;
+      line-height: 1;
+      position: relative;
+      width: 20px;
+      height: 20px;
+    }
+    
+    .remove-domain-btn::before,
+    .remove-domain-btn::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 14px;
+      height: 2px;
+      background-color: var(--error-color);
+      transform: translate(-50%, -50%);
+    }
+    
+    .remove-domain-btn::before {
+      transform: translate(-50%, -50%) rotate(45deg);
+    }
+    
+    .remove-domain-btn::after {
+      transform: translate(-50%, -50%) rotate(-45deg);
+    }
+    
+    .remove-domain-btn:hover {
+      opacity: 0.8;
+    }
+    
+    #saveButton {
+      width: 100%;
+      padding: 12px;
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: var(--border-radius);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background-color 0.2s;
+      margin-top: 16px;
+    }
+    
+    #saveButton:hover {
+      background-color: var(--primary-hover);
+    }
+    
+    #status {
+      margin-top: 16px;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 14px;
+    }
+    
+    .success {
+      background-color: rgba(76, 175, 80, 0.1);
+      color: var(--success-color);
+      border: 1px solid rgba(76, 175, 80, 0.3);
+    }
+    
+    .error {
+      background-color: rgba(244, 67, 54, 0.1);
+      color: var(--error-color);
+      border: 1px solid rgba(244, 67, 54, 0.3);
+    }
+    
+    /* Scrollbar styling */
+    .domain-list::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    .domain-list::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 3px;
+    }
+    
+    .domain-list::-webkit-scrollbar-thumb {
+      background: #c1c1c1;
+      border-radius: 3px;
+    }
+    
+    .domain-list::-webkit-scrollbar-thumb:hover {
+      background: #a1a1a1;
+    }
+  </style>
+</head>
+<body>
+  <h2>Selective Proxy</h2>
+  
+  <div class="card">
+    <div class="form-group">
+      <label for="proxyServer">Proxy Server</label>
+      <input type="text" id="proxyServer" placeholder="e.g., 127.0.0.1:7890">
+    </div>
+  </div>
+  
+  <div class="card">
+    <div class="form-group">
+      <label>Whitelisted Domains</label>
+      <div class="domain-input-container">
+        <input type="text" id="newDomain" placeholder="Add a domain">
+        <button class="add-domain-btn" id="addDomainBtn">+</button>
+      </div>
+      <div class="domain-list" id="domainList"></div>
+    </div>
+  </div>
+  
+  <button id="saveButton">Save & Apply</button>
+  <div id="status"></div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
