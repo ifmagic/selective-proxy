@@ -1,19 +1,30 @@
-<!--
-**realtaobo/realtaobo** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+# Selective Proxy
 
-Here are some ideas to get you started:
+A Chrome extension that routes specific domains through a custom proxy while keeping all other traffic direct.
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+## Features
 
-- 👋 Hi, I'm actively looking for a Rust job 🦀.
-- 🌱 I’m currently learning Rust.
-- 🔭 I used to work with Go/Java frequently in the past.
-- 📫 How to reach me: [realtaobo@outlook.com](realtaobo@outlook.com)
+- **Per-domain proxy routing** — only the domains you specify go through the proxy
+- **PAC script under the hood** — efficient O(1) domain matching via auto-generated PAC
+- **Persistent settings** — configuration synced across Chrome profiles via `chrome.storage.sync`
+- **Clean popup UI** — add / remove domains and set the proxy server in one click
+
+## Quick Install
+
+1. Download the latest `.zip` from the [Releases](../../releases) page.
+2. Unzip the file locally.
+3. Go to `chrome://extensions/`, enable **Developer mode**, and click **Load unpacked**.
+4. Select the unzipped folder.
+
+## Development
+
+```bash
+git clone https://github.com/<owner>/selective-proxy.git
+cd selective-proxy
+```
+
+Load the project folder as an unpacked extension in Chrome (`chrome://extensions/` → Developer mode → Load unpacked).
+
+## License
+
+MIT
