@@ -3,11 +3,12 @@
   "name": "selective-proxy",
   "version": "1.1",
   "description": "Route specific domains through a custom proxy while letting all other traffic remain direct",
-  "permissions": ["proxy", "storage", "tabs"],
+  "permissions": ["proxy", "storage"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icon16.png",
+      "32": "icon32.png",
       "48": "icon48.png",
       "128": "icon128.png"
     }
@@ -17,6 +18,7 @@
   },
   "icons": {
     "16": "icon16.png",
+    "32": "icon32.png",
     "48": "icon48.png",
     "128": "icon128.png"
   }
