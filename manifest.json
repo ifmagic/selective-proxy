@@ -3,7 +3,7 @@
   "name": "selective-proxy",
   "version": "1.1",
   "description": "Route specific domains through a custom proxy while letting all other traffic remain direct",
-  "permissions": ["proxy", "storage"],
+  "permissions": ["proxy", "storage", "tabs", "webNavigation"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
