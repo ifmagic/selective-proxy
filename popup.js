@@ -1,6 +1,9 @@
 document.addEventListener('DOMContentLoaded', function() {
+  const proxyToggle = document.getElementById('proxyToggle');
+  const toggleStatus = document.getElementById('toggleStatus');
+
   // Load saved settings
-  chrome.storage.sync.get(['proxyServer', 'whitelistDomains'], function(result) {
+  chrome.storage.sync.get(['proxyServer', 'whitelistDomains', 'proxyEnabled'], function(result) {
     if (result.proxyServer) {
       document.getElementById('proxyServer').value = result.proxyServer;
     }
@@ -10,6 +13,26 @@ document.addEventListener('DOMContentLoaded', function() {
         .filter(domain => domain.length > 0);
       renderDomainList(domains);
     }
+    // Default to enabled for backward compat
+    const enabled = result.proxyEnabled !== false;
+    proxyToggle.checked = enabled;
+    toggleStatus.textContent = enabled ? 'Enabled' : 'Disabled';
+  });
+
+  // Toggle handler — instant on/off, no save needed
+  proxyToggle.addEventListener('change', function() {
+    const enabled = proxyToggle.checked;
+    toggleStatus.textContent = enabled ? 'Enabling...' : 'Disabling...';
+    chrome.storage.sync.set({ proxyEnabled: enabled }, function() {
+      chrome.runtime.sendMessage({ action: 'toggleProxy' }, function(response) {
+        if (chrome.runtime.lastError || !response || !response.success) {
+          proxyToggle.checked = !enabled;
+          toggleStatus.textContent = 'Failed to update';
+          return;
+        }
+        toggleStatus.textContent = enabled ? 'Enabled' : 'Disabled';
+      });
+    });
   });
 
   // Add domain button click handler
@@ -38,12 +61,12 @@ document.addEventListener('DOMContentLoaded', function() {
       // Send message to background script to update proxy settings
       chrome.runtime.sendMessage({action: 'updateProxy'}, function(response) {
         const status = document.getElementById('status');
-        if (response.success) {
+        if (chrome.runtime.lastError || !response || !response.success) {
+          status.textContent = 'Failed to apply settings';
+          status.className = 'error';
+        } else {
           status.textContent = 'Settings saved and applied!';
           status.className = 'success';
-        } else {
-          status.textContent = 'Error applying settings';
-          status.className = 'error';
         }
         // Clear status after 3 seconds
         setTimeout(function() {

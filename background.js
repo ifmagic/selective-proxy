@@ -1,77 +1,79 @@
-// --- In-memory state ---
-let currentMode = "direct";
-let domainSet = [];
-let proxyConfig = null; // { scheme, host, port }
-let restoreDirectTimer = null;
+// --- Selective Proxy — PAC-based per-request routing ---
+//
+// When enabled: injects a minimal PAC script so whitelisted domains go
+// through the configured proxy while everything else returns DIRECT.
+// When disabled: remove the extension-level proxy settings entirely so
+// Chrome falls back to the user's original/system proxy configuration.
 
-const RESTORE_DIRECT_DELAY = 500; // ms delay before switching back to direct
+// --- Apply or clear proxy based on enabled state ---
 
-// --- Proxy mode switching ---
+function applyProxySettings(callback) {
+  chrome.storage.sync.get(
+    ["proxyServer", "whitelistDomains", "proxyEnabled"],
+    (result) => {
+      const enabled = result.proxyEnabled !== false; // default true for backward compat
+      const proxyServer = (result.proxyServer || "").trim();
+      const rawDomains = result.whitelistDomains || "";
 
-function setProxyDirect() {
-  if (currentMode === "direct") return;
-  currentMode = "direct";
-  chrome.proxy.settings.set(
-    { value: { mode: "direct" }, scope: "regular" },
-    () => console.log("[Selective Proxy] switch to direct")
-  );
-}
+      const domains = rawDomains
+        .split("\n")
+        .map((d) => d.trim().toLowerCase())
+        .filter((d) => d.length > 0);
 
-function setProxyFixed(hostname) {
-  if (!proxyConfig) return;
-  if (currentMode === "proxy") return;
-  currentMode = "proxy";
-  chrome.proxy.settings.set(
-    {
-      value: {
-        mode: "fixed_servers",
-        rules: {
-          singleProxy: {
-            scheme: proxyConfig.scheme,
-            host: proxyConfig.host,
-            port: proxyConfig.port
+      // If disabled, or no proxy, or no domains → remove extension proxy settings
+      if (!enabled || !proxyServer || domains.length === 0) {
+        chrome.proxy.settings.clear(
+          { scope: "regular" },
+          () => {
+            const success = !chrome.runtime.lastError;
+            console.log(
+              "[Selective Proxy] cleared —",
+              !enabled ? "disabled by user" : "no proxy or no domains configured"
+            );
+            if (callback) callback(success);
           }
+        );
+        return;
+      }
+
+      const parsed = parseProxyServer(proxyServer);
+      if (!parsed) {
+        console.log("[Selective Proxy] invalid proxy config:", proxyServer);
+        chrome.proxy.settings.clear(
+          { scope: "regular" },
+          () => {
+            if (callback) callback(!chrome.runtime.lastError);
+          }
+        );
+        return;
+      }
+
+      const pacScript = generatePacScript(parsed, domains);
+
+      chrome.proxy.settings.set(
+        {
+          value: {
+            mode: "pac_script",
+            pacScript: { data: pacScript }
+          },
+          scope: "regular"
+        },
+        () => {
+          const success = !chrome.runtime.lastError;
+          console.log(
+            "[Selective Proxy] config applied:",
+            domains.length,
+            "proxied domains →",
+            parsed.scheme + "://" + parsed.host + ":" + parsed.port
+          );
+          if (callback) callback(success);
         }
-      },
-      scope: "regular"
-    },
-    () => console.log("[Selective Proxy] switch to proxy for", hostname)
+      );
+    }
   );
 }
 
-// --- Domain matching ---
-// "chatgpt.com" matches chatgpt.com, www.chatgpt.com, anything.chatgpt.com
-
-function hostnameMatchesWhitelist(hostname) {
-  for (const domain of domainSet) {
-    if (hostname === domain || hostname.endsWith("." + domain)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// --- Navigation handler ---
-
-function handleNavigation(hostname) {
-  // Cancel any pending restore-to-direct
-  if (restoreDirectTimer !== null) {
-    clearTimeout(restoreDirectTimer);
-    restoreDirectTimer = null;
-  }
-
-  if (hostnameMatchesWhitelist(hostname)) {
-    setProxyFixed(hostname);
-  } else {
-    // Delay switching back to direct to avoid rapid toggling on subpage loads
-    restoreDirectTimer = setTimeout(() => {
-      restoreDirectTimer = null;
-      setProxyDirect();
-    }, RESTORE_DIRECT_DELAY);
-  }
-}
-
-// --- Parse proxy server string "host:port" or "scheme://host:port" ---
+// --- Parse "host:port" or "scheme://host:port" ---
 
 function parseProxyServer(serverStr) {
   if (!serverStr) return null;
@@ -84,98 +86,64 @@ function parseProxyServer(serverStr) {
   }
   const parts = rest.split(":");
   const host = parts[0];
-  const port = parseInt(parts[1], 10) || 7890;
-  return { scheme, host, port };
+  const port = parts[1] ? parseInt(parts[1], 10) : NaN;
+  if (!host || isNaN(port) || port < 1 || port > 65535) {
+    return null;
+  }
+  const typeMap = {
+    http: "PROXY",
+    https: "HTTPS",
+    socks4: "SOCKS4",
+    socks5: "SOCKS5",
+    socks: "SOCKS"
+  };
+  const proxyType = typeMap[scheme] || "PROXY";
+  return { scheme, host, port, proxyType };
 }
 
-// --- Load config from storage ---
+// --- Generate PAC script ---
+// Hash-map O(1) lookup per domain segment. "chatgpt.com" matches
+// chatgpt.com, www.chatgpt.com, x.y.chatgpt.com.
+// Returns "PROXY host:port; DIRECT" so if proxy is down, requests
+// fall back to direct instead of hanging forever.
 
-function loadConfig(callback) {
-  chrome.storage.sync.get(["proxyServer", "whitelistDomains"], (result) => {
-    proxyConfig = parseProxyServer(result.proxyServer || "");
-    const raw = result.whitelistDomains || "";
-    domainSet = raw
-      .split("\n")
-      .map((d) => d.trim().toLowerCase())
-      .filter((d) => d.length > 0);
-
-    if (!proxyConfig || domainSet.length === 0) {
-      // No proxy configured or no domains — ensure direct mode
-      currentMode = "proxy"; // force state so setProxyDirect actually fires
-      setProxyDirect();
-    }
-
-    if (callback) callback();
+function generatePacScript(parsed, domains) {
+  const domainObj = {};
+  domains.forEach((d) => {
+    domainObj[d] = 1;
   });
+
+  return `
+var P = "${parsed.proxyType} ${parsed.host}:${parsed.port}; DIRECT";
+var D = ${JSON.stringify(domainObj)};
+function FindProxyForURL(url, host) {
+  var h = host.toLowerCase();
+  var parts = h.split(".");
+  for (var i = 0; i < parts.length - 1; i++) {
+    if (D[parts.slice(i).join(".")]) return P;
+  }
+  return "DIRECT";
+}`;
 }
 
 // --- Event listeners ---
 
-// Top-level navigations only (frameId === 0)
-chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  if (details.frameId !== 0) return;
-  try {
-    const url = new URL(details.url);
-    if (url.protocol === "http:" || url.protocol === "https:") {
-      handleNavigation(url.hostname.toLowerCase());
-    }
-  } catch (e) {
-    // ignore invalid URLs (chrome://, about:, etc.)
-  }
-});
-
-// Also catch tab switches so proxy mode matches the active tab
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (chrome.runtime.lastError || !tab || !tab.url) return;
-    try {
-      const url = new URL(tab.url);
-      if (url.protocol === "http:" || url.protocol === "https:") {
-        handleNavigation(url.hostname.toLowerCase());
-      } else {
-        // Non-http tab (new tab, settings, etc.) — go direct
-        if (restoreDirectTimer !== null) {
-          clearTimeout(restoreDirectTimer);
-          restoreDirectTimer = null;
-        }
-        setProxyDirect();
-      }
-    } catch (e) {
-      // ignore
-    }
-  });
-});
-
-// Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "updateProxy") {
-    loadConfig(() => {
-      // Re-evaluate the current active tab after config reload
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs && tabs[0] && tabs[0].url) {
-          try {
-            const url = new URL(tabs[0].url);
-            if (url.protocol === "http:" || url.protocol === "https:") {
-              // Reset mode to force re-evaluation
-              const wasMode = currentMode;
-              currentMode = currentMode === "proxy" ? "direct" : "proxy";
-              handleNavigation(url.hostname.toLowerCase());
-            }
-          } catch (e) {
-            // ignore
-          }
-        }
-        sendResponse({ success: true });
+  if (request.action === "updateProxy" || request.action === "toggleProxy") {
+    try {
+      applyProxySettings((success) => {
+        sendResponse({ success: Boolean(success) });
       });
-    });
-    return true; // async response
+    } catch (error) {
+      console.log("[Selective Proxy] message handling failed", error);
+      sendResponse({ success: false });
+    }
+    return true;
   }
 });
 
-// On install/update: load config and set direct as default
 chrome.runtime.onInstalled.addListener(() => {
-  loadConfig();
+  applyProxySettings();
 });
 
-// On service worker startup: reload config from storage
-loadConfig();
+applyProxySettings();
