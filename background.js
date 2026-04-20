@@ -6,8 +6,14 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   }
 });
 
-// Initialize proxy settings on extension load
-updateProxySettings();
+// Only apply proxy settings on first install or extension update,
+// NOT on every service worker startup. chrome.proxy.settings are
+// persistent — re-applying them on every SW wake causes Chrome to
+// invalidate its proxy-resolution cache and re-compile the PAC script,
+// adding latency to every in-flight and subsequent request.
+chrome.runtime.onInstalled.addListener(function() {
+  updateProxySettings();
+});
 
 function updateProxySettings(callback) {
   chrome.storage.sync.get(['proxyServer', 'whitelistDomains'], function(result) {
@@ -15,14 +21,11 @@ function updateProxySettings(callback) {
     const whitelistDomains = result.whitelistDomains || '';
     
     if (!proxyServer) {
-      // No proxy server configured, use direct mode
-      chrome.proxy.settings.set(
-        {
-          value: {
-            mode: 'direct'
-          },
-          scope: 'regular'
-        },
+      // No proxy server configured — clear any extension-level proxy
+      // so Chrome falls back to system/default proxy settings instead
+      // of forcing DIRECT (which would override the user's system proxy).
+      chrome.proxy.settings.clear(
+        { scope: 'regular' },
         function() {
           if (callback) {
             callback({success: true});
@@ -35,6 +38,19 @@ function updateProxySettings(callback) {
         .map(domain => domain.trim())
         .filter(domain => domain.length > 0);
       
+      if (domains.length === 0) {
+        // No domains to proxy — clear settings to avoid unnecessary PAC overhead
+        chrome.proxy.settings.clear(
+          { scope: 'regular' },
+          function() {
+            if (callback) {
+              callback({success: true});
+            }
+          }
+        );
+        return;
+      }
+
       const pacScript = generatePacScript(proxyServer, domains);
       
       // Set proxy settings with PAC script
@@ -59,21 +75,23 @@ function updateProxySettings(callback) {
 }
 
 function generatePacScript(proxyServer, domains) {
+  // Build a domain lookup object for O(1) matching instead of O(n) loop.
+  // Use standard PAC-compatible JS (var, no const/let/arrow/endsWith)
+  // to avoid potential issues with Chrome's PAC sandbox.
+  const domainObj = {};
+  domains.forEach(function(d) { domainObj[d] = true; });
+
   return `
+    var PROXY_RESULT = "PROXY ${proxyServer}";
+    var domainMap = ${JSON.stringify(domainObj)};
     function FindProxyForURL(url, host) {
-      // List of domains to route through proxy
-      const whitelist = ${JSON.stringify(domains)};
-      
-      // Check if host matches any domain in whitelist
-      for (let i = 0; i < whitelist.length; i++) {
-        const domain = whitelist[i];
-        if (host === domain || host.endsWith('.' + domain)) {
-          return 'PROXY ${proxyServer}';
+      var parts = host.split(".");
+      for (var i = 0; i < parts.length - 1; i++) {
+        if (domainMap[parts.slice(i).join(".")]) {
+          return PROXY_RESULT;
         }
       }
-      
-      // All other traffic goes direct
-      return 'DIRECT';
+      return "DIRECT";
     }
   `;
 }
